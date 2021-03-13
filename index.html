@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>deJoplin</title>
+</head>
+
+<body>
+    <h1>方式一（推荐）：</h1>
+    <p>输入你的密码，然后拖入全部加密文件。程序会自动找到密钥然后解密全部文件。</p>
+    <h1>方式二：</h1>
+    <p>直接输入密钥，然后拖入单个或多个加密文件进行解密。</p>
+    <h1>方式三：</h1>
+    <p>输入加密密钥或拖入加密密钥文件获取密钥，然后拖入单个或多个加密文件进行解密。</p>
+    <hr />
+    <h3>输入你的密码</h3>
+    <input id="passwd" type="text" placeholder="Your Password" value="">
+    <h3>或者直接输入密钥</h3>
+    <input id="key" type="text" placeholder="Real Password">
+    <h3>粘贴或者拖入文件</h3>
+    <textarea id="cryptFiles" rows="10" cols="50" placeholder='{"iv":"Base64","v":1,"iter":10000,"ks":256,"ts":64,"mode":"ccm","adata":"","cipher":"aes","salt":"Base64","ct":"Base64"} 
+
+
+    Or Drop Files'></textarea>
+    <script src="js/sjcl.js"></script>
+    <script src="js/jszip.min.js"></script>
+    <script src="js/FileSaver.js"></script>
+    <script src="js/fileType.js"></script>
+
+    <script>
+        var passwd = document.getElementById("passwd");
+        var cryptFiles = document.getElementById("cryptFiles");
+        var key = document.getElementById("key");
+        var files;
+        var zip = new JSZip();
+        //var ready = false;
+        var flag = 0;
+        passwd.addEventListener("input", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            getKey();
+        })
+        cryptFiles.addEventListener("input", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            getKey();
+        })
+        key.addEventListener("input", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            decrypt(files);
+        })
+
+        cryptFiles.addEventListener("drop", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            files = this.files || e.dataTransfer.files;
+            decrypt(files);
+        });
+
+        function getKey() {
+            // let cryptFiles = cryptFiles.value;
+            // let passwd = passwd.value;
+            if (passwd.value && cryptFiles.value) {
+                let deKey = decodeURIComponent(unescape(sjcl.decrypt(passwd.value, cryptFiles.value)));
+                if (deKey) {
+                    key.value = deKey;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        async function decrypt(files) {
+            if (await findKey(files))
+                deFiles(files);
+        }
+
+        async function findKey(files) {
+            for (let f = 0; f < files.length; f++) {
+                let pw = key.value ? key.value : passwd.value;
+                if (!pw) alert('input password!');
+                let text = await readFile(files[f]);
+                let encryptionPassword = text.match(/content:\s(\{.+?\})/);
+                if (encryptionPassword) {
+                    cryptFiles.value = encryptionPassword[1];
+                    ev = document.createEvent("HTMLEvents");
+                    ev.initEvent("input", false, true);
+                    cryptFiles.dispatchEvent(ev);
+                    return true;
+                }
+
+            }
+            return false;
+        }
+
+        async function deFiles(files) {
+            for (let f = 0; f < files.length; f++) {
+                let file = files[f];
+                let fileName = file.name.substring(0, file.name.indexOf("."));
+                let text = await readFile(file);
+                if (/JED.+\{.+\}/.test(text)) {
+                    let encryptionCipherText = text.match(/\{.+?\}/g);
+                    let file64 = '';
+                    for (let i = 0; i < encryptionCipherText.length; i++) {
+                        file64 += sjcl.decrypt(key.value, encryptionCipherText[i]);
+                    }
+                    try {
+                        //decodeURIComponent(unescape(file64))
+                        file64 = decodeURIComponent(unescape(file64));
+
+                    } catch (error) {
+                        console.log(error);
+                        file64 = unescape(file64);
+                    }
+
+                    if (file.name.split('.').pop() === 'md') {
+                        zip.file(fileName + '.md', file64);
+                    } else {
+                        zip.file(fileName, file64, {
+                            base64: true
+                        });
+                        //rename file type
+                        zip.file(fileName).async("uint8array").then((u8a) => {
+                            fileType.fromBuffer(u8a).then((ext) => {
+                                if (ext.ext) {
+                                    zip.file(fileName + '.' + ext.ext, u8a).remove(
+                                        fileName);
+                                }
+                            });
+                        })
+                    }
+                }
+            }
+            //ready = true;
+            check();
+        }
+
+        function readFile(file) {
+            return new Promise(function (resolve, reject) {
+                let reader = new FileReader();
+                reader.readAsText(file, 'utf-8');
+                reader.onloadend = function () {
+                    resolve(this.result);
+                }
+            })
+        }
+
+        function check() {
+            // ready === files.length
+            //if (ready) {
+            zip.generateAsync({
+                type: "blob"
+            }).then(function (content) {
+                content.size > 22 && saveAs(content, "dejoplin.zip");
+            });
+            return;
+
+            //}
+            //setTimeout(check, 3000);
+        };
+    </script>
+</body>
+</html>
